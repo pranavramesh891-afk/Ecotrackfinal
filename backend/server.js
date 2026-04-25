@@ -282,10 +282,25 @@ app.post('/api/classify-waste', authenticateToken, async (req, res) => {
       const apiKey = process.env.GEMINI_API_KEY;
       if (apiKey) {
         const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: 'v1' } });
+        const prompt = `
+You are a waste material expert. Use texture analysis. 
+Plastic has specular highlights and reflections. Cardboard/Paper is matte and shows fiber grain. 
+If you see matte texture with brown/white pulp, it is NOT plastic.
+
+Classify this waste into exactly one of these categories: paper, plastic, cardboard.
+Enforce Multi-Step Reasoning: Before returning the category, analyze and describe:
+1. Surface Texture: Matte, Shiny, or Grainy?
+2. Opacity: Transparent, Translucent, or Opaque?
+3. Structural Clues: Edges, thickness, folds?
+
+Output Format: Return the result strictly as a pure JSON object without markdown wrappers:
+{ "category": "paper|plastic|cardboard", "confidence": "0.xx", "reasoning": "..." }
+        `.trim();
+
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.1-flash-lite-preview',
           contents: [
-            "Classify this waste into exactly one of these categories: paper, plastic, cardboard. Only output the single category word in lowercase. If none matches exactly, pick the closest one from the three.",
+            prompt,
             {
               inlineData: {
                 data: rawBase64,
@@ -294,12 +309,32 @@ app.post('/api/classify-waste', authenticateToken, async (req, res) => {
             }
           ]
         });
-        const ans = response.text.trim().toLowerCase();
+        
+        let ansText = response.text.trim();
+        // Remove markdown formatting if Gemini wrapped it
+        ansText = ansText.replace(/^```(json)?/i, '').replace(/```$/i, '').trim();
+        
+        let aiData;
+        try {
+          aiData = JSON.parse(ansText);
+          console.log("[AI Logic Extraction]:", aiData.reasoning);
+        } catch (e) {
+          console.error("Failed to parse AI JSON:", ansText);
+          aiData = { category: 'plastic', confidence: "0.80", reasoning: String(ansText) }; 
+        }
+
+        const ans = (aiData.category || '').toLowerCase();
+        
         // sanitize strictly
         if (ans.includes('paper')) type = 'paper';
         else if (ans.includes('cardboard')) type = 'cardboard';
         else if (ans.includes('plastic')) type = 'plastic';
         else type = 'plastic'; // rigid fallback
+
+        if (aiData.confidence) {
+          const parsedConf = parseFloat(aiData.confidence);
+          if (!isNaN(parsedConf)) confidence = parsedConf;
+        }
       } else {
         console.warn('⚠️ No GEMINI_API_KEY found, returning fake AI result.');
         type = ['plastic', 'paper', 'cardboard'][Math.floor(Math.random() * 3)];

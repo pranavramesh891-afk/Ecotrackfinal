@@ -11,6 +11,7 @@ export default function LogWaste() {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [aiResult, setAiResult] = useState(null);
+  const [locationWarning, setLocationWarning] = useState('');
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
@@ -38,17 +39,21 @@ export default function LogWaste() {
         throw new Error('Please upload an image for AI classification.');
       }
 
-      // ── Step 1: Get geolocation (optional) ──
-      let location = { lat: 0, lng: 0 };
+      // ── Step 1: Get geolocation with fallback ──
+      let location = { lat: 40.7128, lng: -74.0060 }; // Default to NYC
       if ('geolocation' in navigator) {
         try {
           const pos = await new Promise((resolve, reject) =>
             navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 3000 })
           );
           location = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setLocationWarning(''); // Clear warning on success
         } catch {
-          console.warn("Geolocation not available");
+          console.warn("Geolocation denied or timed out. Falling back to default.");
+          setLocationWarning("Location access denied. Using default location (New York).");
         }
+      } else {
+        setLocationWarning("Location access denied. Using default location (New York).");
       }
 
       console.log("Transmitting image to AI Classifier...");
@@ -120,13 +125,19 @@ export default function LogWaste() {
           {status.msg}
         </div>
       )}
+      
+      {locationWarning && (
+        <div className="status-msg status-error mb-4">
+          ⚠️ {locationWarning}
+        </div>
+      )}
 
       {/* ── AI Result Box ── */}
       {aiResult && (
         <div className="card mb-3 animate-fade-up" style={{ border: '2px solid var(--primary)' }}>
           <div className="card-body" style={{ textAlign: 'center' }}>
             <p style={{ margin: 0, fontWeight: 600, color: 'var(--primary)', marginBottom: 8 }}>
-              OpenAI Vision Results
+              AI Vision Results
             </p>
             <div style={{ fontSize: '2rem', marginBottom: 8 }}>
               {getEmoji(aiResult.category)}
